@@ -1,0 +1,83 @@
+import csv
+import glob
+import gzip
+import json
+import os
+import datetime
+from tqdm import tqdm  # 添加 tqdm
+
+SNAPSHOT_DIR = 'E:/openalex'
+CSV_DIR = 'E:/csv'
+
+if not os.path.exists(CSV_DIR):
+    os.mkdir(CSV_DIR)
+
+FILES_PER_ENTITY = int(os.environ.get('OPENALEX_DEMO_FILES_PER_ENTITY', '0'))
+
+csv_files = {
+    'works': {
+        'works': {
+            'name': os.path.join(CSV_DIR, 'works.csv.gz'),
+            'columns': [
+                'id', 'doi', 'title', 'display_name', 'publication_year',
+                'publication_date', 'type', 'cited_by_count',
+                'is_retracted', 'is_paratext', 'cited_by_api_url',
+                'abstract_inverted_index', 'language'
+            ]
+        },
+        'sdg': {
+            'name': os.path.join(CSV_DIR, 'sdg.csv.gz'),
+            'columns': ['work_id', 'display_name', 'score', 'id']
+        },
+    }
+}
+
+def flatten_works():
+    file_spec = csv_files['works']
+
+    with gzip.open(file_spec['works']['name'], 'wt', encoding='utf-8') as works_csv, \
+         gzip.open(file_spec['sdg']['name'], 'wt', encoding='utf-8') as sdg_csv:
+
+        works_writer = init_dict_writer(works_csv, file_spec['works'], extrasaction='ignore')
+        sdg_writer = init_dict_writer(sdg_csv, file_spec['sdg'])
+
+        files = glob.glob(os.path.join(SNAPSHOT_DIR, 'data', 'works', '*', '*.gz'))
+        files_done = 0
+
+        for jsonl_file_name in tqdm(files, desc="Processing files"):
+            with gzip.open(jsonl_file_name, 'r') as works_jsonl:
+                for work_json in works_jsonl:
+                    if not work_json.strip():
+                        continue
+
+                    work = json.loads(work_json)
+
+                    if not (work_id := work.get('id')):
+                        continue
+
+                    if (abstract := work.get('abstract_inverted_index')) is not None:
+                        work['abstract_inverted_index'] = json.dumps(abstract, ensure_ascii=False)
+
+                    works_writer.writerow(work)
+
+                    for sdg in work.get('sustainable_development_goals', []):
+                        if sdg_id := sdg.get('id'):
+                            sdg_writer.writerow({
+                                'work_id': work_id,
+                                'display_name': sdg.get('display_name'),
+                                'score': sdg.get('score'),
+                                'id': sdg_id
+                            })
+
+            files_done += 1
+            if FILES_PER_ENTITY and files_done >= FILES_PER_ENTITY:
+                break
+
+def init_dict_writer(csv_file, file_spec, **kwargs):
+    writer = csv.DictWriter(csv_file, fieldnames=file_spec['columns'], **kwargs)
+    writer.writeheader()
+    return writer
+
+if __name__ == '__main__':
+    flatten_works()
+
