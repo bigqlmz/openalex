@@ -1,0 +1,287 @@
+import csv
+import glob
+import gzip
+import json
+import os
+from tqdm import tqdm  # 添加 tqdm
+SNAPSHOT_DIR = 'openalex'
+CSV_DIR = 'csv-files'
+
+if not os.path.exists(CSV_DIR):
+    os.mkdir(CSV_DIR)
+
+FILES_PER_ENTITY = int(os.environ.get('OPENALEX_DEMO_FILES_PER_ENTITY', '0'))
+
+csv_files = {
+    'authors': {
+        'authors': {
+            'name': os.path.join(CSV_DIR, 'authors.csv.gz'),
+            'columns': [
+                'id', 'orcid', 'display_name', 'display_name_alternatives',
+                'works_count', 'cited_by_count',
+                'last_known_institution', 'works_api_url', 'updated_date',
+            ]
+        },
+        'ids': {
+            'name': os.path.join(CSV_DIR, 'authors_ids.csv.gz'),
+            'columns': [
+                'author_id', 'openalex', 'orcid', 'scopus', 'twitter',
+                'wikipedia', 'mag'
+            ]
+        },
+        'counts_by_year': {
+            'name': os.path.join(CSV_DIR, 'authors_counts_by_year.csv.gz'),
+            'columns': [
+                'author_id', 'year', 'works_count', 'cited_by_count',
+                'oa_works_count'
+            ]
+        }
+    },
+    'concepts': {
+        'concepts': {
+            'name': os.path.join(CSV_DIR, 'concepts.csv.gz'),
+            'columns': [
+                'id', 'wikidata', 'display_name', 'level', 'description',
+                'works_count', 'cited_by_count', 'image_url',
+                'image_thumbnail_url', 'works_api_url', 'updated_date'
+            ]
+        },
+        'ancestors': {
+            'name': os.path.join(CSV_DIR, 'concepts_ancestors.csv.gz'),
+            'columns': ['concept_id', 'ancestor_id']
+        },
+        'counts_by_year': {
+            'name': os.path.join(CSV_DIR, 'concepts_counts_by_year.csv.gz'),
+            'columns': ['concept_id', 'year', 'works_count', 'cited_by_count',
+                        'oa_works_count']
+        },
+        'ids': {
+            'name': os.path.join(CSV_DIR, 'concepts_ids.csv.gz'),
+            'columns': ['concept_id', 'openalex', 'wikidata', 'wikipedia',
+                        'umls_aui', 'umls_cui', 'mag']
+        },
+        'related_concepts': {
+            'name': os.path.join(CSV_DIR, 'concepts_related_concepts.csv.gz'),
+            'columns': ['concept_id', 'related_concept_id', 'score']
+        }
+    },
+    'topics': {
+        'topics': {
+            'name': os.path.join(CSV_DIR, 'topics.csv.gz'),
+            'columns': ['id', 'display_name', 'subfield_id',
+                        'subfield_display_name', 'field_id',
+                        'field_display_name',
+                        'domain_id', 'domain_display_name', 'description',
+                        'keywords', 'works_api_url', 'wikipedia_id',
+                        'works_count', 'cited_by_count', 'updated_date', 'siblings']
+        }
+    },
+    'institutions': {
+        'institutions': {
+            'name': os.path.join(CSV_DIR, 'institutions.csv.gz'),
+            'columns': [
+                'id', 'ror', 'display_name', 'country_code', 'type',
+                'homepage_url', 'image_url', 'image_thumbnail_url',
+                'display_name_acronyms', 'display_name_alternatives',
+                'works_count', 'cited_by_count', 'works_api_url',
+                'updated_date'
+            ]
+        },
+        'ids': {
+            'name': os.path.join(CSV_DIR, 'institutions_ids.csv.gz'),
+            'columns': [
+                'institution_id', 'openalex', 'ror', 'grid', 'wikipedia',
+                'wikidata', 'mag'
+            ]
+        },
+        'geo': {
+            'name': os.path.join(CSV_DIR, 'institutions_geo.csv.gz'),
+            'columns': [
+                'institution_id', 'city', 'geonames_city_id', 'region',
+                'country_code', 'country', 'latitude',
+                'longitude'
+            ]
+        },
+        'associated_institutions': {
+            'name': os.path.join(CSV_DIR,
+                                 'institutions_associated_institutions.csv.gz'),
+            'columns': [
+                'institution_id', 'associated_institution_id', 'relationship'
+            ]
+        },
+        'counts_by_year': {
+            'name': os.path.join(CSV_DIR, 'institutions_counts_by_year.csv.gz'),
+            'columns': [
+                'institution_id', 'year', 'works_count', 'cited_by_count',
+                'oa_works_count'
+            ]
+        }
+    },
+    'publishers': {
+        'publishers': {
+            'name': os.path.join(CSV_DIR, 'publishers.csv.gz'),
+            'columns': [
+                'id', 'display_name', 'alternate_titles', 'country_codes',
+                'hierarchy_level', 'parent_publisher',
+                'works_count', 'cited_by_count', 'sources_api_url',
+                'updated_date'
+            ]
+        },
+        'counts_by_year': {
+            'name': os.path.join(CSV_DIR, 'publishers_counts_by_year.csv.gz'),
+            'columns': ['publisher_id', 'year', 'works_count', 'cited_by_count',
+                        'oa_works_count']
+        },
+        'ids': {
+            'name': os.path.join(CSV_DIR, 'publishers_ids.csv.gz'),
+            'columns': ['publisher_id', 'openalex', 'ror', 'wikidata']
+        },
+    },
+    'sources': {
+        'sources': {
+            'name': os.path.join(CSV_DIR, 'sources.csv.gz'),
+            'columns': [
+                'id', 'issn_l', 'issn', 'display_name', 'publisher',
+                'works_count', 'cited_by_count', 'is_oa',
+                'is_in_doaj', 'homepage_url', 'works_api_url', 'updated_date'
+            ]
+        },
+        'ids': {
+            'name': os.path.join(CSV_DIR, 'sources_ids.csv.gz'),
+            'columns': ['source_id', 'openalex', 'issn_l', 'issn', 'mag',
+                        'wikidata', 'fatcat']
+        },
+        'counts_by_year': {
+            'name': os.path.join(CSV_DIR, 'sources_counts_by_year.csv.gz'),
+            'columns': ['source_id', 'year', 'works_count', 'cited_by_count',
+                        'oa_works_count']
+        },
+    },
+    'works': {
+        'works': {
+            'name': os.path.join(CSV_DIR, 'works.csv.gz'),
+            'columns': [
+                'id', 'doi', 'title', 'display_name', 'publication_year',
+                'publication_date', 'type', 'cited_by_count',
+                'is_retracted', 'is_paratext', 'cited_by_api_url',
+                'abstract_inverted_index', 'language'
+            ]
+        },
+        'topics': {
+            'name': os.path.join(CSV_DIR, 'works_topics.csv.gz'),
+            'columns': [
+                'work_id', 'topic_id', 'score'
+            ]
+        },
+        'sdg': {
+            'name': os.path.join(CSV_DIR, 'sdg.csv.gz'),
+            'columns': ['work_id', 'display_name', 'score', 'id']
+        },
+        'referenced_works': {
+            'name': os.path.join(CSV_DIR, 'works_referenced_works.csv.gz'),
+            'columns': [
+                'work_id', 'referenced_work_id'
+            ]
+        },
+        'related_works': {
+            'name': os.path.join(CSV_DIR, 'works_related_works.csv.gz'),
+            'columns': [
+                'work_id', 'related_work_id'
+            ]
+        },
+    },
+}
+
+
+def flatten_works():
+    file_spec = csv_files['works']
+
+    with gzip.open(file_spec['works']['name'], 'wt',
+                   encoding='utf-8') as works_csv, \
+            gzip.open(file_spec['sdg']['name'], 'wt',
+                      encoding='utf-8') as sdg_csv,\
+            gzip.open(file_spec['topics']['name'], 'wt',
+                      encoding='utf-8') as topics_csv, \
+            gzip.open(file_spec['referenced_works']['name'], 'wt',
+                      encoding='utf-8') as referenced_works_csv, \
+            gzip.open(file_spec['related_works']['name'], 'wt',
+                      encoding='utf-8') as related_works_csv:
+
+        works_writer = init_dict_writer(works_csv, file_spec['works'],
+                                        extrasaction='ignore')
+        sdg_writer = init_dict_writer(sdg_csv, file_spec['sdg'])
+
+        topics_writer = init_dict_writer(topics_csv, file_spec['topics'])
+        referenced_works_writer = init_dict_writer(referenced_works_csv,
+                                                   file_spec[
+                                                       'referenced_works'])
+        related_works_writer = init_dict_writer(related_works_csv,
+                                                file_spec['related_works'])
+        files = glob.glob(os.path.join(SNAPSHOT_DIR, 'data', 'works', '*', '*.gz'))
+
+        files_done = 0
+        for jsonl_file_name in tqdm(files, desc="Processing files"):
+            with gzip.open(jsonl_file_name, 'r') as works_jsonl:
+                for work_json in works_jsonl:
+                    if not work_json.strip():
+                        continue
+
+                    work = json.loads(work_json)
+
+                    if not (work_id := work.get('id')):
+                        continue
+
+                    if (abstract := work.get('abstract_inverted_index')) is not None:
+                        work['abstract_inverted_index'] = json.dumps(abstract, ensure_ascii=False)
+
+                    works_writer.writerow(work)
+
+                    for sdg in work.get('sustainable_development_goals', []):
+                        if sdg_id := sdg.get('id'):
+                            sdg_writer.writerow({
+                                'work_id': work_id,
+                                'display_name': sdg.get('display_name'),
+                                'score': sdg.get('score'),
+                                'id': sdg_id
+                            })
+
+                    # topics
+                    for topic in work.get('topics', []):
+                        if topic_id := topic.get('id'):
+                            topics_writer.writerow({
+                                'work_id': work_id,
+                                'topic_id': topic_id,
+                                'score': topic.get('score')
+                            })
+
+                    # referenced_works
+                    for referenced_work in work.get('referenced_works'):
+                        if referenced_work:
+                            referenced_works_writer.writerow({
+                                'work_id': work_id,
+                                'referenced_work_id': referenced_work
+                            })
+
+                    # related_works
+                    for related_work in work.get('related_works'):
+                        if related_work:
+                            related_works_writer.writerow({
+                                'work_id': work_id,
+                                'related_work_id': related_work
+                            })
+
+            files_done += 1
+            if FILES_PER_ENTITY and files_done >= FILES_PER_ENTITY:
+                break
+
+
+def init_dict_writer(csv_file, file_spec, **kwargs):
+    writer = csv.DictWriter(
+        csv_file, fieldnames=file_spec['columns'], **kwargs
+    )
+    writer.writeheader()
+    return writer
+
+
+if __name__ == '__main__':
+    flatten_works()
