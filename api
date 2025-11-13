@@ -1,0 +1,46 @@
+import pandas as pd
+import requests
+import time
+import json
+
+# 1. 读取 CSV
+df = pd.read_csv("./data/work_id.csv")
+
+# 2. 清洗成真正的 ID
+df["work_id_clean"] = df["work_id"].str.replace("https://openalex.org/", "", regex=False)
+
+ids = df["work_id_clean"].dropna().unique().tolist()
+
+# 3. 批处理
+batch_size = 50
+output_file = "./output/works_full.jsonl"
+
+for i in range(0, len(ids), batch_size):
+    batch = ids[i:i + batch_size]
+    id_str = "|".join(batch)
+
+    url = "https://api.openalex.org/works"
+    params = {
+        "filter": f"openalex_id:{id_str}",
+        "per_page": 50,
+        "select": (
+            "id,display_name,publication_year,publication_date,"
+            "authorships,countries_distinct_count,institutions_distinct_count,"
+            "topics,sustainable_development_goals,abstract_inverted_index"
+        )
+    }
+
+    print(f"Batch {i//batch_size + 1} ...")
+    r = requests.get(url, params=params)
+    # print(r)
+    data = r.json().get("results", [])
+    # print(data)
+    # break
+    # 追加保存 JSONL
+    with open(output_file, "a", encoding="utf-8") as f:
+        for row in data:
+            f.write(json.dumps(row, ensure_ascii=False) + "\n")
+
+    time.sleep(0.12)
+
+print("Done!")
