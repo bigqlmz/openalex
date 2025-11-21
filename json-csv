@@ -1,0 +1,236 @@
+import pandas as pd
+import ast
+import json
+from collections import Counter
+
+# --------------------------
+# 解析函数（保持不变）
+# --------------------------
+def parse_authorship_list(x):
+    if isinstance(x, list):
+        return x
+    if not isinstance(x, str) or x.strip() == "":
+        return []
+    
+    s = x.strip()
+    if s.startswith('"') and s.endswith('"'):
+        s = s[1:-1]
+    
+    try:
+        return ast.literal_eval(s)
+    except:
+        pass
+    
+    try:
+        return json.loads(s.replace("'", '"'))
+    except:
+        pass
+    
+    return []
+
+def get_country(author):
+    if author.get("countries"):
+        return author["countries"][0]
+    insts = author.get("institutions", [])
+    if insts:
+        return insts[0].get("country_code")
+    return None
+
+def get_institution(author):
+    insts = author.get("institutions", [])
+    if insts:
+        return insts[0].get("id")
+    return None
+
+# --------------------------
+# 提取合作信息
+# --------------------------
+def extract_collaboration_info(authorship_raw):
+    authors = parse_authorship_list(authorship_raw)
+    if not authors:
+        return None, None, None, None
+    
+    all_countries = []
+    all_institutions = []
+    author_count = len(authors)
+    
+    for author in authors:
+        country = get_country(author)
+        if country:
+            all_countries.append(country)
+        
+        institution = get_institution(author)
+        if institution:
+            all_institutions.append(institution)
+    
+    unique_countries = list(set(all_countries))
+    unique_institutions = list(set(all_institutions))
+    
+    country_count = len(unique_countries)
+    institution_count = len(unique_institutions)
+    country_distribution = dict(Counter(all_countries))
+    
+    return country_count, institution_count, author_count, country_distribution
+
+# --------------------------
+# 五类合作类型分类
+# --------------------------
+def five_category_cooperation(row):
+    country_count = row.get('country_count', 1)
+    institution_count = row.get('institution_count', 1)
+    
+    # 单国家情况
+    if country_count == 1:
+        if institution_count == 1:
+            return "1_same_country_same_institution"
+        else:
+            return "2_same_country_different_institutions"
+    
+    # 多国家情况
+    elif country_count == 2:
+        return "3_bilateral_collaboration"
+    elif country_count == 3:
+        return "4_trilateral_collaboration"
+    else:  # country_count >= 4
+        return "5_multilateral_collaboration"
+
+# --------------------------
+# 应用到 DataFrame
+# --------------------------
+
+# 首先检查并筛选2015-2024年的论文
+print("=== 年份筛选 ===")
+print(f"原始数据总论文数: {len(df)}")
+
+if 'publication_year' in df.columns:
+    # 筛选2015-2024年的论文
+    df = df[
+        (df['publication_year'] >= 2015) & 
+        (df['publication_year'] <= 2024)
+    ].copy()
+    
+    print(f"筛选后论文数 (2015-2024): {len(df)}")
+    print(f"年份范围: {df['publication_year'].min()} - {df['publication_year'].max()}")
+    
+    # 显示各年份论文分布
+    print(f"\n2015-2024各年份论文数量:")
+    year_counts = df['publication_year'].value_counts().sort_index()
+    for year, count in year_counts.items():
+        print(f"  {year}: {count}篇")
+else:
+    print("❌ 数据框中不存在'publication_year'列")
+    print("可用的列有:", list(df.columns))
+    # 如果没有年份列，可能需要先处理数据源
+
+# 提取合作信息
+df[["country_count", "institution_count", "author_count", "country_distribution"]] = df["authorships"].apply(
+    lambda x: pd.Series(extract_collaboration_info(x))
+)
+
+# 台湾地区代码替换
+def update_country_distribution(dist_dict):
+    if not isinstance(dist_dict, dict):
+        return dist_dict
+    if "TW" in dist_dict:
+        cn_count = dist_dict.get("CN", 0) + dist_dict["TW"]
+        dist_dict["CN"] = cn_count
+        del dist_dict["TW"]
+    return dist_dict
+
+df["country_distribution"] = df["country_distribution"].apply(update_country_distribution)
+
+# 删除country_count=0的论文
+print("\n=== 删除country_count=0的论文 ===")
+initial_count = len(df)
+df = df[df['country_count'] > 0].copy()
+removed_count = initial_count - len(df)
+print(f"删除country_count=0的论文: {removed_count}篇")
+print(f"剩余论文数: {len(df)}篇")
+print(f"删除比例: {(removed_count/initial_count)*100:.2f}%")
+
+# 应用五类分类
+df["cooperation_type"] = df.apply(five_category_cooperation, axis=1)
+
+# --------------------------
+# 输出结果和统计
+# --------------------------
+
+# 创建result时包含publication_year
+result = df[[
+    "id",
+    "publication_year",  # 保存论文年份信息
+    "country_count", "institution_count", "author_count",
+    "country_distribution",
+    "cooperation_type"
+]]
+
+# 显示统计结果
+print("\n" + "=" * 60)
+print("五类合作模式统计分析 (2015-2024)")
+print("=" * 60)
+
+print(f"\n总论文数: {len(result):,}篇")
+
+# 基本统计
+print(f"\n基本统计:")
+print(f"平均作者数: {result['author_count'].mean():.2f}")
+print(f"平均涉及国家数: {result['country_count'].mean():.2f}")
+print(f"平均涉及机构数: {result['institution_count'].mean():.2f}")
+
+# 五类合作类型分布
+print(f"\n五类合作类型分布:")
+coop_stats = result["cooperation_type"].value_counts().sort_index()
+
+# 定义类型描述
+type_descriptions = {
+    "1_same_country_same_institution": "相同国家 同机构",
+    "2_same_country_different_institutions": "相同国家 不同机构", 
+    "3_bilateral_collaboration": "双边合作",
+    "4_trilateral_collaboration": "三边合作",
+    "5_multilateral_collaboration": "多边合作"
+}
+
+for coop_type, count in coop_stats.items():
+    percentage = (count / len(result)) * 100
+    desc = type_descriptions.get(coop_type, coop_type)
+    print(f"  {desc:<15}: {count:>5}篇 ({percentage:>5.1f}%)")
+
+# 国际合作细分统计
+international_papers = result[result["country_count"] > 1]
+if len(international_papers) > 0:
+    print(f"\n国际合作细分:")
+    bilateral = len(result[result["country_count"] == 2])
+    trilateral = len(result[result["country_count"] == 3])
+    multilateral = len(result[result["country_count"] >= 4])
+    
+    total_international = bilateral + trilateral + multilateral
+    print(f"  双边合作 (2国): {bilateral}篇 ({(bilateral/len(result))*100:.1f}%)")
+    print(f"  三边合作 (3国): {trilateral}篇 ({(trilateral/len(result))*100:.1f}%)")
+    print(f"  多边合作 (4国+): {multilateral}篇 ({(multilateral/len(result))*100:.1f}%)")
+    print(f"  国际合作总计: {total_international}篇 ({(total_international/len(result))*100:.1f}%)")
+
+# 国家参与度排名
+print(f"\n国家参与度排名 (前15):")
+all_countries = []
+for dist in result["country_distribution"]:
+    if isinstance(dist, dict):
+        all_countries.extend(list(dist.keys()))
+
+country_participation = Counter(all_countries)
+for country, count in country_participation.most_common(15):
+    percentage = (count / len(result)) * 100
+    print(f"  {country}: {count:>5}篇 ({percentage:>5.1f}%)")
+
+# 按年份统计合作类型
+print(f"\n按年份的合作类型分布:")
+year_coop = pd.crosstab(result['publication_year'], result['cooperation_type'])
+print(year_coop)
+
+# 验证数据完整性
+print(f"\n=== 数据完整性验证 ===")
+print(f"剩余country_count=0的论文: {len(result[result['country_count'] == 0])}篇")
+print(f"合作类型数量: {len(result['cooperation_type'].unique())}")
+print(f"年份范围: {result['publication_year'].min()} - {result['publication_year'].max()}")
+
+print(f"\n数据预览 (包含年份信息):")
+result.head(10)
