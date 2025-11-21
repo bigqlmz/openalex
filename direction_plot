@@ -1,0 +1,62 @@
+import pandas as pd
+import matplotlib.pyplot as plt
+import numpy as np
+from adjustText import adjust_text
+
+# ======================
+# 1️⃣ 读取数据
+# ======================
+df = pd.read_csv("./output/1029sdg_degree_comparison.csv")
+
+# ======================
+# 2️⃣ 归一化处理（可选，若已归一化可跳过）
+# ======================
+for col in ["in_degree_AI", "in_degree_Non-AI", "out_degree_AI", "out_degree_Non-AI"]:
+    df[f"{col}_norm"] = df[col] / df[col].sum()
+
+# ======================
+# 3️⃣ 绘制散点图
+# ======================
+plt.figure(figsize=(8, 8))
+plt.grid(True, linestyle="--", alpha=0.4)
+
+# 对角线 (y = x)
+plt.plot([0, df[[ "out_degree_AI_norm", "out_degree_Non-AI_norm" ]].max().max()],
+         [0, df[[ "in_degree_AI_norm", "in_degree_Non-AI_norm" ]].max().max()],
+         linestyle="--", color="black", lw=1)
+
+# ======================
+# 非AI点（蓝色）
+# ======================
+plt.scatter(df["out_degree_Non-AI_norm"], df["in_degree_Non-AI_norm"],
+            s=80, color="#377EB8", alpha=0.8, label="Non-AI (normalized)")
+
+# AI点（红色）
+plt.scatter(df["out_degree_AI_norm"], df["in_degree_AI_norm"],
+            s=80, color="#E41A1C", alpha=0.7, label="AI (normalized)")
+
+# ======================
+# 4️⃣ 添加标签
+# ======================
+texts = []
+for _, r in df.iterrows():
+    # 非AI标签
+    texts.append(plt.text(r["out_degree_Non-AI_norm"], r["in_degree_Non-AI_norm"],
+                          str(int(r["sdg"])), color="#084594", fontsize=9))
+    # AI标签
+    texts.append(plt.text(r["out_degree_AI_norm"], r["in_degree_AI_norm"],
+                          str(int(r["sdg"])), color="#99000D", fontsize=9))
+
+adjust_text(texts, arrowprops=dict(arrowstyle="-", color="gray", lw=0.5))
+
+# ======================
+# 5️⃣ 坐标与标题
+# ======================
+plt.xlabel("Normalized Out-degree (Influence share)")
+plt.ylabel("Normalized In-degree (Influence received share)")
+plt.title("AI vs Non-AI SDG Influence Structure (Normalized, Label-adjusted)")
+plt.legend()
+
+plt.tight_layout()
+plt.savefig("./output/1106sdg_AI_vs_NonAI_influence_scatter_adjusted.png", dpi=300)
+plt.show()
